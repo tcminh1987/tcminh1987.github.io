@@ -1,0 +1,236 @@
+This document is part of the my Node-Red Server setup, but the topic of time series database and reporting is a big enough subject to warrant a separate document.
+
+There is a lot of information related to setting up these components and get them connected together which I made a video of. I only use this document to capture the key details and make it easier for you to copy and paste commands.
+
+InfluxDB 2.1, Grafana and Telegraf install
+
+InfluxDB
+Besides SQLite I want to use InfluxDB for primary storage of time series data, and Grafana to display the results. These components are available as docker images and well, but I decided to install everything manually.
+
+I have updated this section as earlier links was pointing to installing InfluxDB 1.x, but now 2.1 is also available. So I have uninstalled InfluxDB 1.8 and used this article on how to install InfluxDB 2.1. You can follow the article as well, but I copied the important steps here:
+
+Add the InfluxBD GPG key to our system:
+
+wget -qO- https://repos.influxdata.com/influxdb.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/influxdb.gpg > /dev/null
+Add the repo:
+
+export DISTRIB_ID=$(lsb_release -si); export DISTRIB_CODENAME=$(lsb_release -sc)
+echo "deb [signed-by=/etc/apt/trusted.gpg.d/influxdb.gpg] https://repos.influxdata.com/${DISTRIB_ID,,} ${DISTRIB_CODENAME} stable" | sudo tee /etc/apt/sources.list.d/influxdb.list > /dev/null
+Update and install InfluxDB 2:
+
+sudo apt-get update && sudo apt-get install influxdb2
+Start the InfluxDB service:
+
+sudo systemctl start influxdb
+Make it auto start with every time the system boots:
+
+sudo systemctl enable influxdb
+Install the CLI user interface:
+
+sudo apt install -y influxdb2-cli
+At this point I had to restart my computer otherwise the setup will not work. Before you do anything, run setup to generate your initial settings: organization, admin user and password bucket name which will be your initial database and retention period. I set my bucket as mydb and retention period to 0 which is infinite.
+
+influx setup
+If everything goes right, you should be able to log into the InfluxBD UI on http://localhost:8086/ with the user and password you just set above.
+
+Grafana
+Grafana will be used for reporting and dashboarding functions. Please open this article on installing Grafana for Debian and follow the To install the latest Enterprise edition section, but note to only execute the Add this repository for stable releases and not the beta. Once that is done, follow the instructions in the Start the server with systemd section. Once that is done as well, you should be able to launch Grafana on http://192.168.xxx.xxx:3000/ logging in with admin/admin and change the default password during the first logon.
+
+Telegraf
+Telegraf is a system monitoring package (CPU usage, disc usage, etc). I installed this component, as it is a very easy way to start generating data and able to play both with InfluxDB and Grafana as well. I used this article for setting up Telegraf.
+
+Add the Telegraf gpg to the system and install Telegraf:
+
+wget -qO- https://repos.influxdata.com/influxdb.key | sudo tee /etc/apt/trusted.gpg.d/influxdb.asc >/dev/null
+source /etc/os-release
+echo "deb https://repos.influxdata.com/${ID} ${VERSION_CODENAME} stable" | sudo tee /etc/apt/sources.list.d/influxdb.list
+sudo apt-get update && sudo apt-get install telegraf
+At this point you can check if the Telegraf service is running:
+
+systemctl status telegraf
+Here you should be able to see where the Telegraf config is stored, for me it is in /etc/telegraf/telegraf.conf. At this point, I can edit this config file:
+
+sudo nano /etc/telegraf/telegraf.conf
+By default the telegraf.conf file has a section to configure the InlfuxDB database: [[outputs.influxdb]]. But this section is for InfluxDB v1.x and above I installed v2.x. Therefore I removed the original [[outputs.influxdb]] second and replaced with this:
+
+# Configuration for sending metrics to InfluxDB
+[[outputs.influxdb_v2]]
+  ## The URLs of the InfluxDB cluster nodes.
+  ##
+  ## Multiple URLs can be specified for a single cluster, only ONE of the
+  ## urls will be written to each interval.
+  ##   ex: urls = ["https://us-west-2-1.aws.cloud2.influxdata.com"]
+  urls = ["http://localhost:8086"]
+
+  ## Token for authentication.
+  token = "xxx"
+
+  ## Organization is the name of the organization you wish to write to; must exist.
+  organization = "yyy"
+
+  ## Destination bucket to write into.
+  bucket = "zzz"
+
+  ## The value of this tag will be used to determine the bucket.  If this
+  ## tag is not set the 'bucket' option is used as the default.
+  # bucket_tag = ""
+
+  ## If true, the bucket tag will not be added to the metric.
+  # exclude_bucket_tag = false
+
+  ## Timeout for HTTP messages.
+  # timeout = "5s"
+
+  ## Additional HTTP headers
+  # http_headers = {"X-Special-Header" = "Special-Value"}
+
+  ## HTTP Proxy override, if unset values the standard proxy environment
+  ## variables are consulted to determine which proxy, if any, should be used.
+  # http_proxy = "http://corporate.proxy:3128"
+
+  ## HTTP User-Agent
+  # user_agent = "telegraf"
+
+  ## Content-Encoding for write request body, can be set to "gzip" to
+  ## compress body or "identity" to apply no encoding.
+  # content_encoding = "gzip"
+
+  ## Enable or disable uint support for writing uints influxdb 2.0.
+  # influx_uint_support = false
+
+  ## Optional TLS Config for use on HTTP connections.
+  # tls_ca = "/etc/telegraf/ca.pem"
+  # tls_cert = "/etc/telegraf/cert.pem"
+  # tls_key = "/etc/telegraf/key.pem"
+  ## Use TLS but skip chain & host verification
+  # insecure_skip_verify = false
+And in this configuration section, you need to maintain the following details:
+
+urls: this is obviously the url where the InfluxDB database is running, localhost if it is the same machine.
+xxx: this is the API Token of the bucket that your have created in the InfluxDB UI (http://influx_ip:8086/). In the UI select Data from the menu, API Tokens, and select the token for the buckets (not the first admin token). Click on it, and you will see the token in the pop-up window.
+yyy: this is your organization which you specified in your InfluxDB initial setup, but you can see that in the UI under your account icon, About and on the Common IDs group you see the organization ID (not the code, the ID).
+zzz: name of the bucket to be used for Telegraf.
+At this point, I had to restart the machine and after that you can use the Explore menu in Influx UI to see if data is being collected.
+
+Setting up InfluxDB 2.x connection in Grafana
+I talk more about the difference between InfluxDB 1.x and 2.x and the Flux and InfluxQL connection type in the video. There is no security (TLS or certificate) configured on my InfluxDB.
+
+Setting up Flux Connection to InfluxDB 2.x
+In the Grafana UI, create a new connection using the following settings (under Configuration / Data Sources). Any fields which is not mentioned here should be left on default.
+
+Name: add a name to your data connection, I am setting this up for every bucket
+Query Language: Flux
+URL: http://localhost:8086 if Grafana is running on the same machine as InfluxDB
+Auth: every option unchecked
+Custom HTTP Headers: nothing added
+Organization: organization ID (name) you configured in the initial InfluxDB setup
+Token: This is your ADMIN API Token from Influx. In the UI select Data from the menu, API Tokens, and select the first token (e.g. admin's Token). Click on it, and you will see the token in the pop-up window.
+Default Bucket: your bucket name.
+Setting up InfluxQL Connection to InfluxDB 2.x
+This is a bit more complicated process which is explained in this forum topic, but essentially it requires two steps:
+
+Map the v2 bucket to a v1 database. More about this can be found in the Influx 2.x documentation
+Create the InfluxQL connection in Grafana
+So for the first step, on your InfluxDB machine execute the following command:
+
+influx v1 dbrp create --db xxx --rp autogen --bucket-id yyy 
+Here the xxx is the name of the new database we are creating (or the bucket that we are mapping to a database) and the yyy is the ID of your existing bucket. You can find the ID in your UI, if you select Data / Buckets and you will see the ID next to the name of the bucket. This will take a second to generate.
+
+Once you have done that, go to Grafana and set up a new database connection to InfluxDB with the following details:
+
+Name: name of the new connection
+Query Language: InfluxQL
+URL: http://localhost:8086 if Grafana is running on the same machine as InfluxDB
+Auth: Basic auth selected, and you fill out the username and the password of your Influx user that you are using to log into the Influx UI.
+Custom HTTP Headers: add 1 header
+Header: Authorization
+Value: Token xxx where xxx is the is your ADMIN API Token from Influx. In the UI select Data from the menu, API Tokens, and select the first token (e.g. admin's Token). Click on it, and you will see the token in the pop-up window.
+Database: the name of the database you specified in the dbrp step above
+User and Password is the same entered in the Auth section
+HTTP Method: GET
+Additional System Monitoring
+Since we have Telegraf installed, I thought we can use it to monitor some additional stuff. First I installed lm-sensors that can read temperature sensors in my computer. What this can return will depend on your computer, in my Inter based PC I have CPU temperature per core, ACPI and ISA temperature as well. For a RaspberryPi there will most probably just a single processor temperature. The second is hddtemp which returns temperature data from hard disks or SSD drives in my case.
+
+You can follow the entire process in this video:
+
+Telegraf setup
+
+Installing packages
+Issue the following from your command line:
+
+sudo apt install hddtemp lm-sensors
+You can check temperature sensors using command sensors and hdd temperature using command sudo hddtemp /dev/sda. All is explained in this article. I will be using this to extend my system monitoring components in Node-Red. Btw, sensors -j returns the information in json format :)
+
+Running hddtemp requires sudo and with the current setting it needs a password to use sudo. So I added this to no password list in visudo. Enter this command:
+
+sudo visudo
+and replace the line we added in the beginning. 'xxx' is obviously your userid. So the existing line:
+
+xxx     ALL=(ALL:ALL) ALL
+to
+
+xxx     ALL=(ALL) NOPASSWD:/usr/sbin/hddtemp
+This will allow hddtemp to be executed with sudo but without a password. That will allow this command to be executed from an exec node in Node-Red.
+
+Directory usage monitoring
+I also wanted to set up directory usage monitoring and for that I followed this article from StackOverflow. I used answer 9 and 11.
+
+First create a directory and a bash script:
+
+sudo sudo mkdir /etc/telegraf/scripts
+sudo nano /etc/telegraf/scripts/disk-usage.sh
+Add this to the bash script and save:
+
+#!/bin/bash
+
+echo "["
+du -ks "$@" | awk '{if (NR!=1) {printf ",\n"};printf "  { \"directory_size_kilobytes\": "$1", \"path\": \""$2"\" }";}'
+echo
+echo "]"
+Add execute right for this file:
+
+sudo chmod 755 /etc/telegraf/scripts/disk-usage.sh
+Add the telegraf user to the influx group:
+
+sudo usermod --groups influxdb --append telegraf
+And add this command to crontab to update access on any newly created file in influx:
+
+sudo crontab -e
+And add this at the end:
+
+10 * * * * chmod -R g+rX /var/lib/influxdb/data > /var/log/influxdb/chmodfix.log 2>&1
+Setting up the Telegraf config
+Above we created the basic Telegraf config and now I added the following to the telegraf.conf file. See above how to edit it. I added the below lines at the end of the file:
+
+This section add temperature monitoring by lm-sensors. I set it to update every 30 seconds:
+
+# Monitor sensors, requires lm-sensors package
+[[inputs.sensors]]
+  interval="30s"
+  ## Remove numbers from field names.
+  ## If true, a field name like 'temp1_input' will be changed to 'temp_input'.
+  # remove_numbers = true
+
+  ## Timeout is the maximum amount of time that the sensors command can run.
+  # timeout = "5s"
+Hard drive and SDD temperature monitoring:
+
+[[inputs.hddtemp]]
+  interval="30s"
+Disk usage monitoring. Here I added 3 directories to monitor. Of course change xxx with your userid:
+
+# Get disk usage for multiple directories
+[[inputs.exec]]
+  commands = [ "/etc/telegraf/scripts/disk-usage.sh /var/lib/influxdb/data /home/xxx /var/lib/grafana" ]
+  timeout = "5s"
+  name_override = "du"
+  name_suffix = ""
+  data_format = "json"
+  tag_keys = [ "path" ]
+  interval = "10m"
+And finally these two entries will collect network traffic information that is displayed in the sample dashboard.
+
+[[inputs.net]]
+[[inputs.netstat]]
+Finalizing the dashboard
+You can watch my video for that, nothing needs to be noted down for those steps.
